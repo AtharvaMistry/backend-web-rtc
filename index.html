@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video Chat App</title>
+    <style>
+      #local-video,
+      #remote-video {
+        width: 320px;
+        height: 240px;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Video Chat App</h1>
+    <div>
+      <video id="local-video" autoplay playsinline></video>
+      <video id="remote-video" autoplay playsinline></video>
+    </div>
+
+    <script>
+      const localVideo = document.getElementById("local-video");
+      const remoteVideo = document.getElementById("remote-video");
+      let localStream;
+      let remoteStream;
+      let peerConnection;
+
+    // Request access to the user's camera and microphone
+    navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+            localStream = stream;
+            localVideo.srcObject = stream;
+
+          // Create a new RTCPeerConnection
+        peerConnection = new RTCPeerConnection();
+
+          // Add the local stream to the RTCPeerConnection
+        stream.getTracks().forEach((track) => {
+            peerConnection.addTrack(track, stream);
+        });
+
+          // Handle incoming streams from the remote peer
+        peerConnection.ontrack = (event) => {
+            remoteStream = event.streams[0];
+            remoteVideo.srcObject = remoteStream;
+        };
+
+        peerConnection
+            .createOffer()
+            .then((offer) => peerConnection.setLocalDescription(offer))
+            .then(() => {
+                const socket = new WebSocket("wss://signaling-server-url");
+                socket.onopen = () => {
+                socket.send(JSON.stringify(peerConnection.localDescription));
+            };
+
+            socket.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+
+                if (message.sdp) {
+                  // Set the remote peer's description
+                peerConnection
+                    .setRemoteDescription(
+                      new RTCSessionDescription(message.sdp)
+                    )
+                    .then(() => {
+                      if (message.sdp.type === "offer") {
+                        // Create an answer to establish the connection
+                        return peerConnection
+                          .createAnswer()
+                          .then((answer) =>
+                            peerConnection.setLocalDescription(answer)
+                          )
+                          .then(() => {
+                            // Send the answer to the remote peer
+                            socket.send(
+                              JSON.stringify(peerConnection.localDescription)
+                            );
+                          });
+                      }
+                    });
+                } else if (message.candidate) {
+                  // Add the ICE candidate received from the remote peer
+                  peerConnection.addIceCandidate(
+                    new RTCIceCandidate(message.candidate)
+                  );
+                }
+              };
+            })
+            .catch((error) => {
+              console.error("Error creating offer:", error);
+            });
+        })
+        .catch((error) => {
+          console.error("Error accessing media devices:", error);
+        });
+    </script>
+  </body>
+</html>
